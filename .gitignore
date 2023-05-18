@@ -130,3 +130,7 @@ dmypy.json
 
 # Occupancy map
 map.png
+
+log_and_control.py
+log.py
+/controllers/main/examples
