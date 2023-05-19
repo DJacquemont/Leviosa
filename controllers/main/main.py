@@ -7,7 +7,7 @@ from my_control import MyController
 import time, random
 
 # Set 'True' to enable random positions of obstacles and the drone
-enable_random_environment = True
+enable_random_environment = False
 # Set seed to replicate the random environment
 # random.seed(3000)
 
