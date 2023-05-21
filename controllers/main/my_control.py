@@ -2,6 +2,7 @@ import numpy as np
 
 class MyController:
     def __init__(self):
+
         # Drone parameters
         self.cruising_height = 0.4
         self.on_platform_height = 0.3
@@ -17,9 +18,9 @@ class MyController:
 
         # States
         self.state, self.future_state = "START", "START"
-        self.state_explore, self.future_state_explore = "FORWARD", "FORWARD"
+        self.state_explore, self.future_state_explore = "OFFPLATFORM", "OFFPLATFORM"
         self.state_land_search, self.future_state_land_search = "SEARCH_LEFT", "SEARCH_LEFT"
-        self.state_homing, self.future_state_homing = "BACKWARD", "BACKWARD"
+        self.state_homing, self.future_state_homing = "OFFPLATFORM", "OFFPLATFORM"
         self.state_land, self.future_state_land = "RECENTERING", "RECENTERING"
         self.state_search_left, self.future_state_search_left = "SEARCH_LEFT", "SEARCH_LEFT"
         self.state_search_right, self.future_state_search_right = "SEARCH_RIGHT", "SEARCH_RIGHT"
@@ -36,10 +37,9 @@ class MyController:
         self.range_left = None
         self.range_down = None
 
+        self.old_range_down = None
         self.safe_range_obs = 0.4
-        self.safe_range_obs_side = 0.2
-        self.range_land_sense_out2in = 0.32
-        self.range_land_sense_in2out = 0.35
+        self.range_z_offset = 0.07
         self.x_offset_max = 0.06
 
         # Map parameters
@@ -74,6 +74,9 @@ class MyController:
 
 
     def step_control(self, sensor_data):
+
+        self.old_range_down = self.range_down 
+
         # Update sensor data
         self.x_drone = sensor_data["x_global"]
         self.y_drone = sensor_data["y_global"]
@@ -149,7 +152,7 @@ class MyController:
                 print("STATUS - exploration")
         else:
             # Take off
-            self.v_x, self.v_y, self.w_z, self.z = 0.0, 0.0, 0.0, 1.3 * self.on_platform_height
+            self.v_x, self.v_y, self.w_z, self.z = 0.0, 0.0, 0.0, 1.15 * self.on_platform_height
         return
 
 
@@ -161,6 +164,13 @@ class MyController:
             print("STATUS - land search")
 
         match self.state_explore:
+
+            case "OFFPLATFORM":
+                self.v_x, self.v_y, self.w_z, self.z = self.cruising_speed, 0.0, 0.0, self.on_platform_height
+
+                if self.range_down - self.old_range_down > self.range_z_offset:
+                    self.future_state_explore = "FORWARD"
+
             case "FORWARD":
                 self.v_x, self.v_y, self.w_z, self.z = self.cruising_speed, 0.0, 0.0, self.cruising_height
 
@@ -203,10 +213,8 @@ class MyController:
                 self.search_backward()
 
         # Condition for next state
-        if (self.range_down < self.range_land_sense_out2in and self.x_drone > self.xlim_land_reg) or np.linalg.norm(
-            [self.start_point[0] - self.x_drone, self.start_point[1] - self.y_drone]
-        ) < 0.1:
-            self.v_x, self.v_y, self.w_z, self.z = 0.0, 0.0, 0.0, self.on_platform_height
+        if (self.old_range_down - self.range_down > self.range_z_offset):
+            self.v_x, self.v_y, self.w_z, self.z = self.v_x, self.v_y, self.w_z, self.on_platform_height
             self.future_state = "LAND"
             self.parking_zone.append([self.x_drone, self.y_drone])
             print("STATUS - landing")
@@ -241,7 +249,8 @@ class MyController:
                 elif self.state_land_search == "SEARCH_FORWARD" or self.state_land_search == "SEARCH_BACKWARD":
                     self.v_x, self.v_y, self.w_z, self.z = 0.0, self.parking_speed, 0.0, self.on_platform_height
 
-                if self.range_down > self.range_land_sense_in2out:
+                if (self.range_down - self.old_range_down > self.range_z_offset):
+                    self.v_x, self.v_y, self.w_z, self.z = -self.v_x, -self.v_y, 0.0, self.cruising_height
                     self.parking_zone.append([self.x_drone, self.y_drone])
                     self.future_state_land = "PARKING"
 
@@ -260,6 +269,9 @@ class MyController:
                 else:
                     self.v_x = (self.parking_zone[0][0] + self.parking_clearance) - self.x_drone
                     self.v_y = (self.parking_zone[0][1] + self.parking_clearance) - self.y_drone
+                
+                if (self.old_range_down - self.range_down > self.range_z_offset):
+                    self.z = self.on_platform_height
 
                 if abs(self.v_x) < self.parking_min_vel and abs(self.v_y) < self.parking_min_vel:
                     self.future_state_land = "LANDING"
@@ -297,6 +309,13 @@ class MyController:
             print("STATUS - land search")
 
         match self.state_homing:
+            
+            case "OFFPLATFORM":
+                self.v_x, self.v_y, self.w_z, self.z = -self.cruising_speed, 0.0, 0.0, self.on_platform_height
+
+                if self.range_down - self.old_range_down > self.range_z_offset:
+                    self.future_state_homing = "BACKWARD"
+
             case "BACKWARD":
                 self.v_x, self.v_y, self.w_z, self.z = -self.cruising_speed, 0.0, 0.0, self.cruising_height
 
@@ -391,7 +410,6 @@ class MyController:
 
     def search_backward(self):
         x_goal, _ = self.setpoints[self.index_current_setpoint]
-        print("self.state_search_backward: ", self.state_search_backward)
 
         match self.state_search_backward:
             case "SEARCH_BACKWARD":
